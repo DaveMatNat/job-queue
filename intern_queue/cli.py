@@ -88,10 +88,35 @@ def init():
     console.print(f"created {config['general']['db_path']} — next: intern-queue poll")
 
 
+def ingest(con, raws, config, referrals) -> tuple[Counter, list[int], Counter, list]:
+    """Normalize, knockout-filter, and upsert a batch of RawListings.
+    Returns (outcome counts, new listing ids, drop reasons, new referral holds)."""
+    counts, new_ids, drop_reasons, holds = Counter(), [], Counter(), []
+    for rl in raws:
+        listing = to_listing(rl, config["general"]["season"])
+        reason = knockout_reason(listing, config)
+        if reason:
+            db.record_drop(con, rl.source, rl.source_id, listing.company, listing.title, reason)
+            if reason == "inactive":
+                db.deactivate_if_known(con, rl.source, rl.source_id)
+            drop_reasons[reason.split(":")[0]] += 1
+            counts["dropped"] += 1
+            continue
+        hold = norm_company(listing.company) in referrals
+        outcome, lid = db.upsert(con, listing, canonical_key(
+            listing.company, listing.title, listing.locations), hold)
+        counts[outcome] += 1
+        if outcome == "new":
+            new_ids.append(lid)
+            if hold:
+                holds.append(listing)
+    con.commit()
+    return counts, new_ids, drop_reasons, holds
+
+
 def poll_once(config, candidate, con) -> int:
     """Fetch every source, upsert, notify. Returns the number of new listings."""
     referrals = referral_companies(candidate)
-    season = config["general"]["season"]
     new_ids, drop_reasons = [], Counter()
     report = Table(title=f"poll @ {db.now_iso()}")
     for col in ("source", "result", "new", "linked", "seen", "dropped"):
@@ -107,27 +132,12 @@ def poll_once(config, candidate, con) -> int:
             if raws is None:
                 report.add_row(name, "304 not modified", "0", "0", "0", "0")
                 continue
-            counts = Counter()
-            for rl in raws:
-                listing = to_listing(rl, season)
-                reason = knockout_reason(listing, config)
-                if reason:
-                    db.record_drop(con, rl.source, rl.source_id, listing.company, listing.title, reason)
-                    if reason == "inactive":
-                        db.deactivate_if_known(con, rl.source, rl.source_id)
-                    drop_reasons[reason.split(":")[0]] += 1
-                    counts["dropped"] += 1
-                    continue
-                hold = norm_company(listing.company) in referrals
-                outcome, lid = db.upsert(con, listing, canonical_key(
-                    listing.company, listing.title, listing.locations), hold)
-                counts[outcome] += 1
-                if outcome == "new":
-                    new_ids.append(lid)
-                    if hold:
-                        err.print(Panel(f"{listing.company}: {listing.title}\n{render.REFERRAL_WARNING}",
-                                        style="bold red", title="NEW REFERRAL_HOLD LISTING"))
-            con.commit()
+            counts, ids, drops, holds = ingest(con, raws, config, referrals)
+            new_ids += ids
+            drop_reasons += drops
+            for listing in holds:
+                err.print(Panel(f"{listing.company}: {listing.title}\n{render.REFERRAL_WARNING}",
+                                style="bold red", title="NEW REFERRAL_HOLD LISTING"))
             report.add_row(name, f"{len(raws)} listings", *(str(counts[k]) for k in ("new", "linked", "seen", "dropped")))
     console.print(report)
     if drop_reasons:

@@ -1,0 +1,84 @@
+# intern-queue configuration.
+# `intern-queue init` copies this next to your DB; edit that copy freely.
+# Every knob the ranking uses lives here — `intern-queue explain <id>` shows
+# exactly how each one contributed, so tune by looking at explains, not source.
+
+[general]
+season = "Summer 2027"          # knockout: listings tagged with any other season are dropped
+db_path = "intern_queue.db"
+candidate_file = "candidate.yaml"
+
+[filters]
+# Case-insensitive substring match against any of a listing's locations.
+# Empty = allow everywhere. Example: ["Remote", "NY", "San Francisco", "Nashville"]
+allowed_locations = []
+# Titles matching any of these regexes (case-insensitive) are dropped outright.
+exclude_title_patterns = [
+    "product manage", "sales engineer", "\\bIT support\\b", "business analyst",
+    "\\bMBA\\b", "\\bPhD\\b", "masters? student", "\\bMS/PhD\\b",
+]
+
+[scoring]
+default_tier = 0.5              # tier for companies not in [companies]
+recency_half_life_days = 3.0    # score halves every 3 days since first seen
+recency_floor = 0.15            # old postings bottom out here, never at zero
+
+# role_fit = base + sum(matching include weights) + sum(matching exclude weights),
+# clamped to [0.05, 1.0]. Patterns are case-insensitive regexes against the title.
+[scoring.role_fit]
+base = 0.4
+
+[scoring.role_fit.include]
+"software (engineer|develop)|\\bswe\\b" = 0.5
+"machine learning|\\bml\\b" = 0.6
+"\\bai\\b|artificial intelligence" = 0.5
+"research" = 0.4
+"quant" = 0.4
+"infrastructure|platform|backend|distributed|systems" = 0.3
+"data (science|scientist|engineer)" = 0.2
+
+[scoring.role_fit.exclude]
+"\\btest\\b|\\bqa\\b|quality assurance" = -0.2
+"hardware|embedded|fpga|asic|firmware" = -0.25
+"frontend|front.end|mobile|\\bios\\b|android" = -0.1
+
+# ats_friction: apply-URL host fragment -> multiplier. First match wins.
+# "custom" applies to careers./jobs. subdomains and /careers paths; "unknown" to the rest.
+[scoring.ats]
+"greenhouse.io" = 1.0
+"lever.co" = 1.0
+"ashbyhq.com" = 1.0
+"rippling.com" = 0.9
+"smartrecruiters.com" = 0.7
+"icims.com" = 0.5
+"myworkdayjobs.com" = 0.35
+"workday" = 0.35
+custom = 0.6
+unknown = 0.5
+
+# Company tiers, 1.0 = drop-everything priority. Matched case-insensitively on the
+# normalized name (Inc/LLC/Corp stripped), so "Google" also matches "Google LLC".
+# `init` seeds this from tiers in candidate.yaml; after that, this file wins.
+[companies]
+Anthropic = 1.0
+OpenAI = 1.0
+Google = 1.0
+"Jane Street" = 0.95
+Citadel = 0.95
+Nvidia = 0.9
+Databricks = 0.9
+"Scale AI" = 0.85
+"Capital One" = 0.85
+
+[notify]
+enabled = false                 # flip on after setting ntfy_url
+ntfy_url = ""                   # e.g. "https://ntfy.sh/some-hard-to-guess-topic"
+min_score = 0.55                # only listings scoring at least this notify
+digest_interval_minutes = 15    # at most one digest per window; extras roll over
+
+[watch]
+interval_minutes = 30           # clamped to >= 10 — never hammer the sources
+
+[enrich]
+model = "claude-opus-5"
+batch_size = 25

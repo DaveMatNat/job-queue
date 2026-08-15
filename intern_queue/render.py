@@ -66,7 +66,7 @@ def explain_view(row, score, sources: str, console: Console) -> None:
         table.add_column(col)
     table.add_row("tier_weight", f"{score.tier_weight:.2f}",
                   "matched company " + repr(score.tier_source) if score.tier_source != "default"
-                  else "not in [companies] — default_tier")
+                  else r"not in \[companies] — default_tier")
     fits = ", ".join(f"{p!r} {w:+.2f}" for p, w in score.role_matches) or "no patterns matched (base only)"
     table.add_row("role_fit", f"{score.role_fit:.2f}", fits)
     table.add_row("recency", f"{score.recency:.3f}",

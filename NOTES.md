@@ -41,9 +41,11 @@ live data on the date above, not assumed. Re-verify at the start of each season.
   only option, per the fallback rule.
 - Default branch is `main`. USA internships live in `README.md`; international in
   `INTERN_INTL.md` (skipped — US search). New-grad files also present (skipped).
-- Table sections are delimited by `<!-- TABLE_FAANG_START -->` /
-  `<!-- TABLE_QUANT_START -->` / `<!-- TABLE_OTHER_START -->` markers.
-  Columns: `Company | Position | Location | Salary | Posting | Age`.
+- Table sections: `<!-- TABLE_FAANG_START -->`, `<!-- TABLE_QUANT_START -->`, and
+  — trap — the "Other" section uses **bare** `<!-- TABLE_START -->` markers with
+  no section name. FAANG/QUANT columns are
+  `Company | Position | Location | Salary | Posting | Age`; the Other table
+  **drops the Salary column** (5 columns). The parser handles both by cell count.
 - **No stable listing ID** — we derive `source_id` from a hash of the apply URL.
 - `Age` is relative (`3d`, `12h`, `2w`, `1mo`). We approximate `posted_at` as
   `now − age` at first sight; ranking uses our own `first_seen_at` anyway.

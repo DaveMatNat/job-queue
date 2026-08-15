@@ -1,0 +1,69 @@
+# candidate.example.yaml — copy to candidate.yaml and fill in.
+# candidate.yaml is gitignored: it holds work authorization, GPA, phone, address.
+#
+# RULE: a blank value means UNKNOWN. It is never permission to infer.
+identity:
+  legal_name: ""
+  preferred_name: ""
+  email: ""
+  phone: ""
+  city_state: ""
+  permanent_address: ""
+education:
+  university: ""
+  school: ""
+  degree: "B.S."
+  majors: []
+  minor: ""
+  graduation: ""               # e.g. "2028-05"
+  gpa: ""                      # or the literal string DO_NOT_DISCLOSE
+  prior_institution: ""
+  prior_gpa: ""
+links:
+  linkedin: ""
+  github: ""
+  portfolio: ""
+eligibility:
+  # NEVER infer any of these. Leave blank and let the tool escalate.
+  work_authorization: ""
+  requires_future_sponsorship: ""
+  citizenship_answers: ""
+  security_clearance: ""
+  relocation: ""
+  preferred_locations: []
+job_preferences:
+  target_roles: []
+  excluded_roles: []
+  target_locations: []
+  excluded_companies: []
+  remote_preference: ""
+  season: "Summer 2027"
+application_preferences:
+  salary_answer: ""
+  demographic_questions: "DECLINE_TO_ANSWER"
+  auto_submit: false           # do not change this
+  uncertain_question_behavior: "ASK"
+documents:
+  swe_resume: "resumes/swe.pdf"
+  ml_resume: "resumes/ml.pdf"
+  transcript: ""
+approved_facts:
+  skills:
+    languages: []
+    frameworks: []
+    tools: []
+  coursework: []
+  experiences: []
+  projects: []
+  awards: []
+referrals: []
+  # - company: "Example Corp"
+  #   contact: ""
+  #   role: ""
+  #   status: "none"            # have_referral | requested | none
+  #   notes: ""
+tiers:
+  default: 0.5
+  companies: {}
+    # Anthropic: 1.0
+    # "Jane Street": 0.95

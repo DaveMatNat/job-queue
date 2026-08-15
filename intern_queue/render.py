@@ -28,15 +28,16 @@ def queue_table(scored: list, console: Console) -> None:
         names = ", ".join(sorted({r["company"] for r, _, _ in holds}))
         console.print(Panel(REFERRAL_WARNING + f"\n\nHeld companies in this queue: [bold]{names}[/bold]",
                             style="bold red", title="REFERRAL HOLD"))
-    table = Table(title="intern-queue — ranked queue", show_lines=False)
-    for col in ("id", "score", "flag", "company", "title", "location", "age", "resume", "sources", "apply via"):
-        table.add_column(col)
+    table = Table(title="intern-queue — ranked queue")
+    for col, width in (("id", 4), ("score", 5), ("flag", 8), ("company", 18), ("title", 44),
+                       ("location", 15), ("age", 5), ("resume", 3), ("sources", 14), ("apply via", 18)):
+        table.add_column(col, max_width=width, overflow="ellipsis", no_wrap=True)
     for row, score, sources in scored:
-        flag = "[bold red]REFERRAL_HOLD[/bold red]" if row["referral_hold"] else row["status"]
+        flag = "[bold red]REF_HOLD[/bold red]" if row["referral_hold"] else row["status"]
         locs = json.loads(row["locations"])
         table.add_row(
             str(row["id"]), f"{score.total:.3f}", flag, row["company"],
-            row["title"][:60], (locs[0] if locs else "?") + (f" +{len(locs) - 1}" if len(locs) > 1 else ""),
+            row["title"], (locs[0] if locs else "?") + (f" +{len(locs) - 1}" if len(locs) > 1 else ""),
             _age(score), row["resume_version"], sources, _host(row["apply_url"]),
         )
     console.print(table)

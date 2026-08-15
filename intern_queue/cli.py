@@ -54,6 +54,14 @@ def fetch_queue_rows(con, statuses=("NEW", "QUEUED")):
     ).fetchall()
 
 
+def _transition(con, listing_id: int, state: str, reason: str | None = None) -> str:
+    try:
+        return db.set_status(con, listing_id, state, reason)
+    except KeyError:
+        err.print(f"[red]no listing {listing_id}[/red]")
+        raise typer.Exit(1)
+
+
 @app.command()
 def init():
     """Create the DB and write a default config.toml (seeded from candidate.yaml tiers)."""
@@ -190,7 +198,7 @@ def apply(listing_id: int, force: bool = typer.Option(False, "--force", help="ov
 def skip(listing_id: int, reason: str = typer.Option("", "--reason")):
     """Mark a listing SKIPPED, with an optional reason for the record."""
     _, _, con = open_session()
-    prev = db.set_status(con, listing_id, "SKIPPED", reason or None)
+    prev = _transition(con, listing_id, "SKIPPED", reason or None)
     console.print(f"[{listing_id}]: {prev} → SKIPPED" + (f" ({reason})" if reason else ""))
 
 
@@ -202,7 +210,7 @@ def status(listing_id: int, state: str):
         err.print(f"[red]state must be one of: {', '.join(db.STATUSES)}[/red]")
         raise typer.Exit(1)
     _, _, con = open_session()
-    prev = db.set_status(con, listing_id, state)
+    prev = _transition(con, listing_id, state)
     console.print(f"[{listing_id}]: {prev} → {state}")
 
 

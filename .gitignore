@@ -1,0 +1,16 @@
+# candidate.yaml holds work authorization, GPA, phone, and address — never commit it.
+candidate.yaml
+
+# local state (the packaged default template intern_queue/config.toml IS tracked)
+*.db
+*.db-journal
+/config.toml
+resumes/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+uv.lock
+*.egg-info/

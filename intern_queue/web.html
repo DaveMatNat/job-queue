@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:">
+<title>intern-queue</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb;
+    --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --hairline: #e1e0d9; --border: rgba(11,11,11,0.10);
+    --accent: #2a78d6; --accent-ink: #ffffff; --accent-soft: #cde2fb;
+    --good: #0ca30c; --good-text: #006300; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --violet: #4a3aa7; --orange: #eb6834; --yellow: #eda100;
+    --hold-bg: #fdf1f1; --shadow: 0 8px 30px rgba(11,11,11,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19;
+      --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --hairline: #2c2c2a; --border: rgba(255,255,255,0.10);
+      --accent: #3987e5; --accent-ink: #ffffff; --accent-soft: #184f95;
+      --good: #0ca30c; --good-text: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+      --violet: #9085e9; --orange: #d95926; --yellow: #c98500;
+      --hold-bg: #2a1b1b; --shadow: 0 8px 30px rgba(0,0,0,.5);
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button { font: inherit; cursor: pointer; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header { position: sticky; top: 0; z-index: 20; display: flex; gap: 12px; align-items: center;
+           height: 58px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--hairline); }
+  .brand b { font-size: 16px; letter-spacing: -0.01em; }
+  .brand .sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+  #search { flex: 1; max-width: 460px; padding: 7px 12px; border: 1px solid var(--hairline);
+            border-radius: 8px; background: var(--page); color: var(--ink); outline: none; }
+  #search:focus { border-color: var(--accent); }
+  .spacer { flex: 1; }
+  .btn { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--hairline);
+         background: var(--surface); color: var(--ink); }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn:disabled { opacity: .55; cursor: wait; }
+
+  .tabs { display: flex; gap: 2px; padding: 10px 20px 0; max-width: 1240px; margin: 0 auto; }
+  .tab { padding: 7px 14px; border: none; background: none; color: var(--ink-2);
+         border-radius: 8px 8px 0 0; border-bottom: 2px solid transparent; }
+  .tab .n { color: var(--muted); font-size: 12px; margin-left: 4px; font-variant-numeric: tabular-nums; }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+
+  main { max-width: 1240px; margin: 0 auto; padding: 14px 20px 80px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; padding: 12px 14px; }
+  .tile .label { font-size: 11.5px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 26px; font-weight: 650; margin-top: 2px; }
+  .tile .hint { font-size: 11.5px; color: var(--muted); }
+
+  .banner { display: flex; gap: 10px; align-items: baseline; background: var(--hold-bg);
+            border: 1px solid var(--critical); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+  .banner b { color: var(--critical); white-space: nowrap; }
+
+  /* overflow: clip keeps the rounded corners without becoming the sticky
+     containment block — thead must stick to the *viewport*, under the header */
+  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; overflow: clip; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 980px; }
+  thead th { text-align: left; font-size: 11.5px; color: var(--muted); text-transform: uppercase;
+             letter-spacing: .04em; font-weight: 600; padding: 9px 8px; border-bottom: 1px solid var(--hairline);
+             position: sticky; top: 59px; background: var(--surface); z-index: 5; }
+  tbody td { padding: 9px 8px; border-bottom: 1px solid var(--hairline); vertical-align: middle; overflow: hidden; }
+  td.loc { white-space: nowrap; text-overflow: ellipsis; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.hold { background: var(--hold-bg); box-shadow: inset 3px 0 0 var(--critical); }
+  .num { font-variant-numeric: tabular-nums; }
+  .scorecell { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+  .bar { flex: 1; height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 0 3px 3px 0; }
+  .company { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title-cell .inner { display: flex; align-items: center; gap: 6px; }
+  .title-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flags { display: inline-flex; gap: 6px; flex: none; }
+  .flag { font-size: 11px; padding: 0 6px; border-radius: 99px; border: 1px solid var(--border); color: var(--ink-2); }
+  .flag.ko { border-color: var(--critical); color: var(--critical); }
+  .flag.esc { border-color: var(--yellow); color: var(--yellow); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2);
+          padding: 2px 9px; border: 1px solid var(--hairline); border-radius: 99px; white-space: nowrap; }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .src { font-size: 11px; color: var(--muted); border: 1px solid var(--hairline); border-radius: 5px;
+         padding: 1px 5px; margin-right: 3px; white-space: nowrap; }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  .empty { padding: 44px; text-align: center; color: var(--muted); }
+
+  /* drawer */
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 30; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 94vw); z-index: 31;
+            background: var(--surface); border-left: 1px solid var(--hairline); box-shadow: var(--shadow);
+            overflow-y: auto; padding: 20px 22px; }
+  #drawer h2 { margin: 2px 0 2px; font-size: 18px; letter-spacing: -0.01em; }
+  #drawer .close { position: absolute; top: 12px; right: 14px; border: none; background: none;
+                   font-size: 20px; color: var(--muted); }
+  .section { margin-top: 18px; }
+  .section h3 { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 8px; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .factor { display: grid; grid-template-columns: 92px 52px 1fr; gap: 10px; padding: 6px 0;
+            border-bottom: 1px solid var(--hairline); font-size: 13px; align-items: baseline; }
+  .factor:last-child { border-bottom: none; }
+  .factor .why { color: var(--ink-2); font-size: 12.5px; }
+  .warnbox { background: var(--hold-bg); border: 1px solid var(--critical); border-radius: 10px;
+             padding: 10px 12px; font-size: 13px; margin-top: 12px; }
+  .warnbox b { color: var(--critical); }
+  .list { margin: 0; padding-left: 18px; font-size: 13px; }
+  .list.ko li { color: var(--critical); }
+  .list.esc li { color: var(--ink-2); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .reveal { background:none; border:none; color: var(--muted); font-size: 12px; text-decoration: underline; padding: 0; }
+
+  /* stats */
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .statcard { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 16px; }
+  .statcard h3 { margin: 0 0 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .hrow { display: grid; grid-template-columns: 92px 1fr 40px; gap: 10px; align-items: center; padding: 3px 0; font-size: 13px; }
+  .hrow .hbar { height: 10px; background: var(--hairline); border-radius: 3px; }
+  .hrow .hbar i { display: block; height: 100%; background: var(--accent); border-radius: 0 3px 3px 0; }
+  .hrow .v { text-align: right; color: var(--ink-2); }
+
+  #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 50;
+           background: var(--ink); color: var(--page); padding: 10px 18px; border-radius: 10px;
+           font-size: 13px; box-shadow: var(--shadow); opacity: 0; transition: opacity .18s; pointer-events: none;
+           max-width: 80vw; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>intern-queue</b><div class="sub" id="sub">loading…</div></div>
+  <input id="search" type="search" placeholder="Search company or title…" autocomplete="off">
+  <div class="spacer"></div>
+  <a class="btn" href="/api/export.md" download="queue.md" title="Download the queue as markdown">Export .md</a>
+  <button class="btn" id="enrichbtn" title="Run one LLM enrichment batch (needs ANTHROPIC_API_KEY)">Enrich</button>
+  <button class="btn primary" id="pollbtn">Poll sources</button>
+</header>
+
+<nav class="tabs" id="tabs"></nav>
+
+<main>
+  <section class="tiles" id="tiles"></section>
+  <section class="banner" id="banner" hidden></section>
+  <section class="card" id="listwrap">
+    <table>
+      <colgroup>
+        <col style="width:118px"><col style="width:150px"><col>
+        <col style="width:130px"><col style="width:46px"><col style="width:68px">
+        <col style="width:96px"><col style="width:120px"><col style="width:104px">
+      </colgroup>
+      <thead><tr>
+        <th>Score</th><th>Company</th><th>Role</th><th>Location</th><th>Age</th>
+        <th>Résumé</th><th>Sources</th><th>Via</th><th>Status</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden></div>
+  </section>
+  <section id="statsview" hidden></section>
+</main>
+
+<div id="overlay" hidden></div>
+<aside id="drawer" hidden></aside>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+const TABS = [
+  ["queue",    "Queue",      ["NEW","QUEUED"]],
+  ["applied",  "Applied",    ["APPLIED"]],
+  ["pipeline", "Interviews", ["OA","INTERVIEW","OFFER"]],
+  ["archive",  "Archive",    ["SKIPPED","REJECTED"]],
+  ["stats",    "Stats",      null],
+];
+const STATUS_DOT = { NEW: "var(--accent)", QUEUED: "var(--violet)", APPLIED: "var(--good)",
+  OA: "var(--yellow)", INTERVIEW: "var(--orange)", OFFER: "var(--good)",
+  REJECTED: "var(--critical)", SKIPPED: "var(--muted)" };
+const SRC_SHORT = { simplify: "simplify", vansh: "vansh", speedyapply_swe: "sa·swe", speedyapply_ai: "sa·ai" };
+
+const state = { tab: "queue", q: "", listings: [], stats: null, meta: {}, counts: {}, sel: null };
+
+function toast(msg, ms = 3600) {
+  $("toast").textContent = msg;
+  $("toast").classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => $("toast").classList.remove("show"), ms);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(data.error || r.statusText), { status: r.status, data });
+  return data;
+}
+
+function fmtAge(days) {
+  if (days < 1) return Math.max(1, Math.round(days * 24)) + "h";
+  return days.toFixed(days < 10 ? 1 : 0) + "d";
+}
+function host(url) { try { return new URL(url).host.replace(/^www\./, ""); } catch { return "—"; } }
+function fmtWhen(iso) {
+  if (!iso) return "never polled";
+  const mins = Math.round((Date.now() - new Date(iso + (iso.endsWith("Z") || iso.includes("+") ? "" : "Z"))) / 60000);
+  if (mins < 1) return "polled just now";
+  if (mins < 60) return `polled ${mins}m ago`;
+  if (mins < 60 * 36) return `polled ${Math.round(mins / 60)}h ago`;
+  return `polled ${Math.round(mins / 1440)}d ago`;
+}
+
+/* ---------- tabs ---------- */
+function renderTabs() {
+  $("tabs").innerHTML = TABS.map(([id, label]) => {
+    const n = state.counts[id];
+    return `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${label}` +
+           (n != null ? `<span class="n">${n}</span>` : "") + `</button>`;
+  }).join("");
+}
+$("tabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]");
+  if (b) { state.tab = b.dataset.tab; closeDrawer(); loadTab(); }
+});
+
+/* ---------- data ---------- */
+async function loadTab() {
+  renderTabs();
+  const isStats = state.tab === "stats";
+  $("listwrap").hidden = isStats;
+  $("banner").hidden = true;
+  $("statsview").hidden = !isStats;
+  if (isStats) { renderStats(); return; }
+  const statuses = TABS.find(t => t[0] === state.tab)[2];
+  const data = await api("/api/listings?statuses=" + statuses.join(","));
+  state.listings = data.listings;
+  state.meta = data.meta;
+  $("sub").textContent = `${state.meta.season} · ${fmtWhen(state.meta.last_poll)}`;
+  renderRows();
+}
+
+async function loadStats() {
+  state.stats = await api("/api/stats");
+  const s = state.stats;
+  $("sub").textContent = `${s.season} · ${fmtWhen(s.last_poll)}`;
+  state.counts = {
+    queue: (s.by_status.NEW || 0) + (s.by_status.QUEUED || 0),
+    applied: s.by_status.APPLIED || 0,
+    pipeline: (s.by_status.OA || 0) + (s.by_status.INTERVIEW || 0) + (s.by_status.OFFER || 0),
+    archive: (s.by_status.SKIPPED || 0) + (s.by_status.REJECTED || 0),
+  };
+  renderTabs();
+  $("tiles").innerHTML = [
+    ["In queue", state.counts.queue, "NEW + QUEUED"],
+    ["Fresh &lt; 72h", s.fresh_72h, "recency window"],
+    ["Applied", s.applied, "all time"],
+    ["Heard back", s.applied ? Math.round(100 * s.responded / s.applied) + "%" : "—",
+      `${s.responded}/${s.applied} reached OA+`],
+  ].map(([l, v, h]) => `<div class="tile"><div class="label">${l}</div><div class="value num">${v}</div><div class="hint">${h}</div></div>`).join("");
+  if (state.tab === "stats") renderStats();
+}
+
+/* ---------- table ---------- */
+function match(it) {
+  if (!state.q) return true;
+  const q = state.q.toLowerCase();
+  return it.company.toLowerCase().includes(q) || it.title.toLowerCase().includes(q);
+}
+
+function renderRows() {
+  const items = state.listings.filter(match);
+  const holds = items.filter(i => i.referral_hold);
+  if (holds.length && state.tab === "queue") {
+    $("banner").hidden = false;
+    $("banner").innerHTML = `<b>⚠ REFERRAL HOLD</b><span>You have a referral at ` +
+      `<b>${esc([...new Set(holds.map(h => h.company))].join(", "))}</b> — never apply through the cold link. ` +
+      `Route through your contact; these rows are pinned on top.</span>`;
+  } else $("banner").hidden = true;
+
+  $("empty").hidden = items.length > 0;
+  if (!items.length) $("empty").textContent = state.q ? "Nothing matches your search." : "Nothing here yet — run a poll.";
+
+  $("rows").innerHTML = items.map(it => {
+    const pct = Math.round(it.score.total * 100);
+    const flags =
+      (it.knockouts.length ? `<span class="flag ko" title="${esc(it.knockouts.join("\n"))}">⛔ ${it.knockouts.length}</span>` : "") +
+      (it.escalations.length ? `<span class="flag esc" title="${esc(it.escalations.join("\n"))}">? ${it.escalations.length}</span>` : "") +
+      (it.referral_hold ? `<span class="flag ko">REFERRAL</span>` : "");
+    const loc = it.locations[0] ? esc(it.locations[0]) + (it.locations.length > 1 ? ` <span class="muted">+${it.locations.length - 1}</span>` : "") : "—";
+    return `<tr data-id="${it.id}" class="${it.referral_hold ? "hold" : ""}">
+      <td><div class="scorecell"><div class="bar"><i style="width:${pct}%"></i></div><span class="num">${it.score.total.toFixed(3)}</span></div></td>
+      <td class="company" title="${esc(it.company)}">${esc(it.company)}</td>
+      <td class="title-cell"><div class="inner"><span class="title-txt" title="${esc(it.title)}">${esc(it.title)}</span>${flags ? `<span class="flags">${flags}</span>` : ""}</div></td>
+      <td class="small loc">${loc}</td>
+      <td class="num small muted">${fmtAge(it.score.age_days)}</td>
+      <td class="small">${it.resume}</td>
+      <td>${it.sources.map(s => `<span class="src">${esc(SRC_SHORT[s] || s)}</span>`).join("")}</td>
+      <td class="small muted">${esc(host(it.apply_url))}</td>
+      <td><span class="chip"><span class="dot" style="background:${STATUS_DOT[it.status] || "var(--muted)"}"></span>${it.status}</span></td>
+    </tr>`;
+  }).join("");
+}
+$("rows").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-id]");
+  if (tr) openDrawer(+tr.dataset.id);
+});
+$("search").addEventListener("input", e => { state.q = e.target.value.trim(); renderRows(); });
+
+/* ---------- drawer ---------- */
+function closeDrawer() { $("drawer").hidden = true; $("overlay").hidden = true; state.sel = null; }
+$("overlay").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+
+function openDrawer(id) {
+  const it = state.listings.find(x => x.id === id);
+  if (!it) return;
+  state.sel = id;
+  const s = it.score;
+  const factors = [
+    ["tier", s.tier.toFixed(2), s.tier_source === "default" ? "not in config [companies] — default" : `matched “${esc(s.tier_source)}”`],
+    ["role fit", s.fit.toFixed(2), s.matches.length ? s.matches.map(m => `${esc(m[0])} ${m[1] > 0 ? "+" : ""}${m[1]}`).join(" · ") : "base only — no patterns matched"],
+    ["recency", s.recency.toFixed(3), `first seen ${fmtAge(s.age_days)} ago (3-day half-life)`],
+    ["ats", s.ats.toFixed(2), esc(s.ats_reason)],
+    ["total", `<b>${s.total.toFixed(3)}</b>`, "tier × fit × recency × ats"],
+  ].map(([k, v, why]) => `<div class="factor"><span class="muted">${k}</span><span class="num">${v}</span><span class="why">${why}</span></div>`).join("");
+
+  const applyLink = it.referral_hold
+    ? `<button class="reveal" data-act="reveal">show cold link anyway (don’t use it)</button><span id="coldlink" hidden> <a href="${esc(it.apply_url)}" target="_blank" rel="noopener">${esc(host(it.apply_url))}</a></span>`
+    : `<a class="btn primary" href="${esc(it.apply_url)}" target="_blank" rel="noopener">Open apply page ↗</a>`;
+
+  const nexts = { NEW: ["QUEUED"], QUEUED: [], APPLIED: ["OA", "INTERVIEW", "OFFER", "REJECTED"],
+                  OA: ["INTERVIEW", "OFFER", "REJECTED"], INTERVIEW: ["OFFER", "REJECTED"],
+                  OFFER: [], REJECTED: [], SKIPPED: ["NEW"] }[it.status] || [];
+  const inQueue = it.status === "NEW" || it.status === "QUEUED";
+
+  $("drawer").innerHTML = `
+    <button class="close" title="Close">✕</button>
+    <div class="muted small">#${it.id} · <span class="chip"><span class="dot" style="background:${STATUS_DOT[it.status]}"></span>${it.status}</span></div>
+    <h2>${esc(it.company)}</h2>
+    <div style="font-size:15px">${esc(it.title)}</div>
+    ${it.referral_hold ? `<div class="warnbox"><b>⚠ REFERRAL HOLD.</b> You have a referral at ${esc(it.company)}.
+      Applying through the cold link would burn it irreversibly — route through your contact first.</div>` : ""}
+    <div class="actions">
+      ${applyLink}
+      ${inQueue ? `<button class="btn" data-act="applied">Mark applied</button>` : ""}
+      ${it.status === "NEW" ? `<button class="btn" data-act="queue">Stage</button>` : ""}
+      ${inQueue ? `<button class="btn" data-act="skip">Skip…</button>` : ""}
+      ${nexts.map(n => `<button class="btn" data-act="status" data-state="${n}">${n[0] + n.slice(1).toLowerCase()}</button>`).join("")}
+    </div>
+    <div class="section"><h3>Score breakdown</h3>${factors}</div>
+    ${it.note || it.knockouts.length || it.escalations.length ? `
+      <div class="section"><h3>Enrichment</h3>
+        ${it.knockouts.length ? `<ul class="list ko">${it.knockouts.map(k => `<li>${esc(k)}</li>`).join("")}</ul>` : ""}
+        ${it.escalations.length ? `<div class="small muted" style="margin:6px 0 2px">Answer these yourself:</div>
+          <ul class="list esc">${it.escalations.map(k => `<li>${esc(k)}</li>`).join("")}</ul>` : ""}
+        ${it.note ? `<p class="small" style="margin:8px 0 0">${esc(it.note)}</p>` : ""}
+      </div>` : ""}
+    <div class="section"><h3>Details</h3>
+      <div class="kv">
+        <span class="k">Locations</span><span>${esc(it.locations.join("; ") || "unknown")}</span>
+        <span class="k">Season</span><span>${esc(it.season || "unknown")}</span>
+        <span class="k">Sponsorship</span><span>${esc(it.sponsorship || "—")}</span>
+        <span class="k">Résumé</span><span>${it.resume} (${esc(it.role_class)})</span>
+        <span class="k">Sources</span><span>${it.sources.map(x => `<span class="src">${esc(SRC_SHORT[x] || x)}</span>`).join("")}</span>
+        <span class="k">First seen</span><span class="num">${esc((it.first_seen_at || "").replace("T", " ").replace("+00:00", " UTC"))}</span>
+        ${it.url && it.url !== it.apply_url ? `<span class="k">Listing page</span><span><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(host(it.url))}</a></span>` : ""}
+      </div>
+    </div>`;
+  $("drawer").hidden = false;
+  $("overlay").hidden = false;
+
+  $("drawer").querySelector(".close").onclick = closeDrawer;
+  $("drawer").querySelectorAll("[data-act]").forEach(b => b.onclick = () => act(it, b.dataset.act, b.dataset.state));
+}
+
+async function act(it, action, nextState) {
+  try {
+    if (action === "reveal") {
+      if (confirm("This is the COLD link for a company where you have a referral.\nOnly open it to read the posting — do not apply through it.")) {
+        const el = $("coldlink");
+        if (el) el.hidden = false;
+      }
+      return;
+    }
+    let body;
+    if (action === "applied") body = { id: it.id, action: "apply" };
+    else if (action === "queue") body = { id: it.id, action: "status", state: "QUEUED" };
+    else if (action === "skip") {
+      const reason = prompt("Skip reason (optional):") ?? null;
+      if (reason === null) return;
+      body = { id: it.id, action: "skip", reason };
+    } else body = { id: it.id, action: "status", state: nextState };
+
+    let res;
+    try {
+      res = await api("/api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    } catch (e) {
+      if (e.status === 409 && e.data.error === "referral_hold") {
+        const ok = confirm(`⚠ REFERRAL HOLD — ${e.data.company}\n\n` +
+          "Marking this APPLIED should only happen if you applied THROUGH YOUR REFERRAL, not the cold link.\n\n" +
+          "Did you apply via the referral?");
+        if (!ok) return;
+        res = await api("/api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, force: true }) });
+      } else throw e;
+    }
+    toast(`#${res.id}: ${res.from} → ${res.to}`);
+    closeDrawer();
+    await Promise.all([loadTab(), loadStats()]);
+  } catch (e) {
+    toast("Error: " + e.message);
+  }
+}
+
+/* ---------- stats view ---------- */
+function hrows(obj, order) {
+  const entries = order ? order.filter(k => obj[k] != null).map(k => [k, obj[k]]) : Object.entries(obj);
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  return entries.map(([k, v]) =>
+    `<div class="hrow"><span class="muted small">${esc(k)}</span><div class="hbar"><i style="width:${Math.round(100 * v / max)}%"></i></div><span class="v num">${v}</span></div>`
+  ).join("") || `<div class="muted small">nothing yet</div>`;
+}
+
+function renderStats() {
+  const s = state.stats;
+  if (!s) return;
+  const weeks = Object.fromEntries(s.weeks.map(w => [w.week, w.n]));
+  $("statsview").innerHTML = `<div class="statgrid">
+    <div class="statcard"><h3>Pipeline</h3>${hrows(s.by_status, ["NEW","QUEUED","APPLIED","OA","INTERVIEW","OFFER","REJECTED","SKIPPED"])}</div>
+    <div class="statcard"><h3>Applications / week</h3>${hrows(weeks)}</div>
+    <div class="statcard"><h3>Applied by tier</h3>${hrows(s.by_tier)}</div>
+    <div class="statcard"><h3>Applied by source</h3>${hrows(s.by_source)}</div>
+    <div class="statcard"><h3>Knockout drops (why listings were excluded)</h3>${hrows(s.drops)}</div>
+    <div class="statcard"><h3>Response rate</h3>
+      <div class="tile" style="border:none;padding:0"><div class="value num">${s.applied ? Math.round(100 * s.responded / s.applied) + "%" : "—"}</div>
+      <div class="hint">${s.responded} of ${s.applied} applications reached OA or later</div></div></div>
+  </div>`;
+}
+
+/* ---------- poll & enrich ---------- */
+$("pollbtn").addEventListener("click", async () => {
+  const b = $("pollbtn");
+  b.disabled = true; b.textContent = "Polling…";
+  try {
+    const res = await api("/api/poll", { method: "POST", body: "{}" });
+    const th304 = res.results.filter(r => r.result.includes("304")).length;
+    const errs = res.results.filter(r => r.result.startsWith("error"));
+    let msg = res.new === 0 && th304 === res.results.length ? "No changes — all sources returned 304."
+      : `${res.new} new listing${res.new === 1 ? "" : "s"}.`;
+    const holds = res.results.flatMap(r => r.holds);
+    if (holds.length) msg += ` ⚠ ${holds.length} new REFERRAL HOLD!`;
+    if (errs.length) msg += ` (${errs.length} source error${errs.length > 1 ? "s" : ""})`;
+    toast(msg, 5000);
+    await Promise.all([loadTab(), loadStats()]);
+  } catch (e) { toast("Poll failed: " + e.message); }
+  b.disabled = false; b.textContent = "Poll sources";
+});
+
+$("enrichbtn").addEventListener("click", async () => {
+  const b = $("enrichbtn");
+  b.disabled = true; b.textContent = "Enriching…";
+  try {
+    const res = await api("/api/enrich", { method: "POST", body: "{}" });
+    toast(res.message, 6000);
+    await loadTab();
+  } catch (e) { toast("Enrich failed: " + e.message, 6000); }
+  b.disabled = false; b.textContent = "Enrich";
+});
+
+/* ---------- boot (supports deep links: #stats, #<listing id>) ---------- */
+const hash = location.hash.slice(1);
+if (hash === "stats" || TABS.some(t => t[0] === hash)) state.tab = TABS.some(t => t[0] === hash) ? hash : "stats";
+loadTab().then(() => { if (/^\d+$/.test(hash)) openDrawer(+hash); }).catch(e => toast(e.message));
+loadStats().catch(() => {});
+</script>
+</body>
+</html>

@@ -114,42 +114,58 @@ def ingest(con, raws, config, referrals) -> tuple[Counter, list[int], Counter, l
     return counts, new_ids, drop_reasons, holds
 
 
-def poll_once(config, candidate, con) -> int:
-    """Fetch every source, upsert, notify. Returns the number of new listings."""
+def poll_all(config, candidate, con) -> tuple[list[dict], list[int], Counter]:
+    """Fetch and ingest every source (shared by CLI poll and the web UI).
+    Returns (per-source report dicts, new listing ids, drop reasons)."""
     referrals = referral_companies(candidate)
-    new_ids, drop_reasons = [], Counter()
-    report = Table(title=f"poll @ {db.now_iso()}")
-    for col in ("source", "result", "new", "linked", "seen", "dropped"):
-        report.add_column(col)
+    results, new_ids, drop_reasons = [], [], Counter()
     with httpx.Client(timeout=60) as client:
         for name, fetch in ALL_SOURCES:
             try:
                 raws = fetch(client, con)
             except Exception as e:  # one dead source must not kill the run
-                err.print(f"[red]{name}: {e} — continuing with other sources[/red]")
-                report.add_row(name, f"error: {type(e).__name__}", "-", "-", "-", "-")
+                results.append({"source": name, "result": f"error: {type(e).__name__}: {e}",
+                                "counts": {}, "holds": []})
                 continue
             if raws is None:
-                report.add_row(name, "304 not modified", "0", "0", "0", "0")
+                results.append({"source": name, "result": "304 not modified", "counts": {}, "holds": []})
                 continue
             counts, ids, drops, holds = ingest(con, raws, config, referrals)
             new_ids += ids
             drop_reasons += drops
-            for listing in holds:
-                err.print(Panel(f"{listing.company}: {listing.title}\n{render.REFERRAL_WARNING}",
-                                style="bold red", title="NEW REFERRAL_HOLD LISTING"))
-            report.add_row(name, f"{len(raws)} listings", *(str(counts[k]) for k in ("new", "linked", "seen", "dropped")))
-    console.print(report)
-    if drop_reasons:
-        console.print("drops this run: " + ", ".join(f"{k}={v}" for k, v in drop_reasons.most_common())
-                      + "  (details in the `drops` table)")
-    console.print(f"[bold]{len(new_ids)} new listing(s)[/bold]")
+            results.append({"source": name, "result": f"{len(raws)} listings", "counts": dict(counts),
+                            "holds": [f"{l.company}: {l.title}" for l in holds]})
+    return results, new_ids, drop_reasons
+
+
+def notify_new(con, config, new_ids: list[int]) -> None:
     if new_ids:
         tiers = tier_map(config)
         rows = con.execute(
             f"SELECT * FROM listings WHERE id IN ({','.join('?' * len(new_ids))})", new_ids).fetchall()
         notify.queue_hits(con, config, [(r, score_row(r, config, tiers=tiers)) for r in rows])
     notify.flush(con, config)
+
+
+def poll_once(config, candidate, con) -> int:
+    """Fetch every source, upsert, notify. Returns the number of new listings."""
+    results, new_ids, drop_reasons = poll_all(config, candidate, con)
+    report = Table(title=f"poll @ {db.now_iso()}")
+    for col in ("source", "result", "new", "linked", "seen", "dropped"):
+        report.add_column(col)
+    for r in results:
+        c = r["counts"]
+        report.add_row(r["source"], r["result"],
+                       *(str(c.get(k, 0)) for k in ("new", "linked", "seen", "dropped")))
+        for hold in r["holds"]:
+            err.print(Panel(f"{hold}\n{render.REFERRAL_WARNING}",
+                            style="bold red", title="NEW REFERRAL_HOLD LISTING"))
+    console.print(report)
+    if drop_reasons:
+        console.print("drops this run: " + ", ".join(f"{k}={v}" for k, v in drop_reasons.most_common())
+                      + "  (details in the `drops` table)")
+    console.print(f"[bold]{len(new_ids)} new listing(s)[/bold]")
+    notify_new(con, config, new_ids)
     return len(new_ids)
 
 
@@ -266,6 +282,17 @@ def watch():
             time.sleep(interval)
     except KeyboardInterrupt:
         console.print("stopped")
+
+
+@app.command()
+def web(port: int = typer.Option(8777, "--port"),
+        no_browser: bool = typer.Option(False, "--no-browser", help="don't open a browser tab")):
+    """Serve the web UI on localhost — everything the CLI does, in one page."""
+    from intern_queue.web import serve
+
+    config, candidate, con = open_session()
+    con.close()  # validated config + candidate + schema; the server opens per-request connections
+    serve(config, candidate, port, open_browser=not no_browser)
 
 
 @app.command()

@@ -22,14 +22,34 @@ between seasons.
 uv sync                      # or: python -m venv .venv && pip install -e .
 uv run intern-queue init     # creates DB + config.toml (+ candidate.yaml from the example)
 $EDITOR candidate.yaml       # fill in your details — this file is gitignored, keep it that way
-uv run intern-queue poll
-uv run intern-queue queue
+uv run intern-queue web      # opens the web UI — or use the CLI below
 ```
 
-## Commands
+## Web UI
+
+```sh
+uv run intern-queue web             # http://127.0.0.1:8777, opens your browser
+uv run intern-queue web --port 9000 --no-browser
+```
+
+One page, everything in it: the ranked queue, tabs for Applied / Interviews /
+Archive, a stats dashboard, search, a detail drawer with the full score
+breakdown, and buttons for poll, enrich, and markdown export. Click any row to
+open it; act from the drawer.
+
+It is deliberately boring infrastructure — the Python standard library's
+`http.server` plus one self-contained HTML file, no framework and no build step.
+It reads and writes the same SQLite DB as the CLI, so the two stay in sync and
+you can use either. It binds to `127.0.0.1` only, so nothing is exposed to your
+network, and it enforces the same referral-hold rules server-side that the CLI
+does: applying to a held company returns a 409 the UI turns into a confirm
+dialog, and the cold link stays hidden behind a second click.
+
+## CLI commands
 
 ```
 intern-queue init                  # create db, write default config
+intern-queue web [--port 8777]     # the web UI (everything below, in a browser)
 intern-queue poll                  # fetch all sources (304s are free), upsert, report new
 intern-queue queue [--top 25]      # ranked table; REFERRAL_HOLD rows pinned on top
 intern-queue queue --md > queue.md # markdown with clickable apply links

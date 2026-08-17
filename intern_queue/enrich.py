@@ -4,6 +4,7 @@ approved_facts + eligibility. The model classifies and flags; it never decides
 whether to apply, and resume_version is re-derived from role_class in code."""
 
 import json
+import os
 from pathlib import Path
 
 import yaml
@@ -74,11 +75,39 @@ def resume_for(role_class: str) -> str:
     return "ml" if role_class in ("ml", "research") else "swe"
 
 
-def run_enrichment(con, config, candidate, console, batches: int = 1) -> None:
+def preflight() -> list[str]:
+    """Everything that must be true before an enrichment call can work.
+    Returns a list of human-readable blockers — empty means ready. Checked up
+    front so both preconditions surface at once, instead of one error per fix."""
+    blockers = []
     try:
-        import anthropic
+        import anthropic  # noqa: F401
     except ImportError:
-        raise SystemExit("enrichment needs the anthropic SDK: uv sync --extra enrich")
+        blockers.append(
+            "The anthropic SDK isn't installed. Run `uv sync` (it is a normal "
+            "dependency now), then restart the server."
+        )
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        blockers.append(
+            "ANTHROPIC_API_KEY isn't set in the environment this process was started from. "
+            "Set it and restart: export ANTHROPIC_API_KEY=sk-ant-... "
+            "(get one at console.anthropic.com)"
+        )
+    return blockers
+
+
+def pending_count(con) -> int:
+    return con.execute(
+        "SELECT count(*) n FROM listings WHERE enriched_at IS NULL AND is_active=1"
+        " AND status IN ('NEW','QUEUED')").fetchone()["n"]
+
+
+def run_enrichment(con, config, candidate, console, batches: int = 1) -> None:
+    blockers = preflight()
+    if blockers:
+        raise SystemExit(" ".join(blockers))
+    import anthropic
+
     client = anthropic.Anthropic()
     system = build_system(candidate)
     for _ in range(batches):

@@ -50,6 +50,31 @@ def test_action_validation(con, config, candidate):
     assert code == 200 and payload["to"] == "SKIPPED"
 
 
+def test_stats_reports_enrich_readiness(con, config, candidate, monkeypatch):
+    seed(con, config, candidate)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    blocked = stats_payload(con, config)["enrich"]
+    assert blocked["ready"] is False and blocked["blockers"]
+    assert blocked["pending"] == 3  # all seeded rows are unenriched
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    ok = stats_payload(con, config)["enrich"]
+    assert ok["ready"] is True and ok["blockers"] == []
+
+
+def test_enrich_endpoint_returns_actionable_400_when_unconfigured(con, config, candidate, monkeypatch):
+    from intern_queue.web import run_enrich
+
+    seed(con, config, candidate)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    code, payload = run_enrich(config, candidate, con)
+    assert code == 400 and "ANTHROPIC_API_KEY" in payload["error"]
+    # nothing was written — a setup failure must not mark rows enriched
+    assert con.execute("SELECT count(*) n FROM listings WHERE enriched_at IS NOT NULL").fetchone()["n"] == 0
+
+
 def test_stats_payload_shape(con, config, candidate):
     seed(con, config, candidate)
     lid = con.execute("SELECT id FROM listings WHERE referral_hold=0").fetchone()["id"]

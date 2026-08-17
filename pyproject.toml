@@ -8,10 +8,14 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "pyyaml>=6.0",
+    # Used *only* by the optional Phase 2 enrichment step, but shipped by default:
+    # as an extra, a plain `uv sync` left the Enrich button broken with a message
+    # telling you to re-run install with a different flag.
+    "anthropic>=0.40",
 ]
 
 [project.optional-dependencies]
-enrich = ["anthropic>=0.40"]
+enrich = []  # kept so `uv sync --extra enrich` from older docs still resolves
 
 [project.scripts]
 intern-queue = "intern_queue.cli:app"

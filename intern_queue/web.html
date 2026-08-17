@@ -136,10 +136,17 @@
   .hrow .v { text-align: right; color: var(--ink-2); }
 
   #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 50;
-           background: var(--ink); color: var(--page); padding: 10px 18px; border-radius: 10px;
-           font-size: 13px; box-shadow: var(--shadow); opacity: 0; transition: opacity .18s; pointer-events: none;
-           max-width: 80vw; }
+           background: var(--ink); color: var(--page); padding: 12px 18px; border-radius: 10px;
+           font-size: 13px; line-height: 1.5; box-shadow: var(--shadow); opacity: 0;
+           transition: opacity .18s; pointer-events: none; max-width: min(680px, 88vw); }
   #toast.show { opacity: 1; }
+  /* sticky errors stay until dismissed — a setup fix takes longer to read than 3s */
+  #toast.sticky { pointer-events: auto; cursor: pointer; border: 1px solid var(--critical); }
+  #toast.sticky::after { content: "click to dismiss"; display: block; margin-top: 6px;
+                         font-size: 11px; opacity: .6; }
+  #toast code { background: rgba(255,255,255,.14); padding: 1px 6px; border-radius: 4px;
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .btn.needs-setup { border-color: var(--warning); }
 </style>
 </head>
 <body>
@@ -198,12 +205,16 @@ const SRC_SHORT = { simplify: "simplify", vansh: "vansh", speedyapply_swe: "sa·
 
 const state = { tab: "queue", q: "", listings: [], stats: null, meta: {}, counts: {}, sel: null };
 
+// ms = 0 keeps it up until clicked; used for setup errors that need reading.
 function toast(msg, ms = 3600) {
-  $("toast").textContent = msg;
-  $("toast").classList.add("show");
+  const el = $("toast");
+  el.innerHTML = esc(msg).replace(/`([^`]+)`/g, "<code>$1</code>");
+  el.classList.add("show");
+  el.classList.toggle("sticky", ms === 0);
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => $("toast").classList.remove("show"), ms);
+  if (ms) toast._t = setTimeout(() => el.classList.remove("show"), ms);
 }
+$("toast").addEventListener("click", () => $("toast").classList.remove("show"));
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -259,6 +270,7 @@ async function loadStats() {
   state.stats = await api("/api/stats");
   const s = state.stats;
   $("sub").textContent = `${s.season} · ${fmtWhen(s.last_poll)}`;
+  renderEnrichButton(s.enrich);
   state.counts = {
     queue: (s.by_status.NEW || 0) + (s.by_status.QUEUED || 0),
     applied: s.by_status.APPLIED || 0,
@@ -471,15 +483,37 @@ $("pollbtn").addEventListener("click", async () => {
   b.disabled = false; b.textContent = "Poll sources";
 });
 
+// Show what's missing *before* the click, rather than failing on it.
+function renderEnrichButton(info) {
+  const b = $("enrichbtn");
+  if (!info) return;
+  const ready = info.ready;
+  b.classList.toggle("needs-setup", !ready);
+  b.textContent = ready ? (info.pending ? `Enrich ${info.pending}` : "Enrich") : "⚠ Enrich";
+  b.title = ready
+    ? `Send the next ${Math.min(25, info.pending)} unenriched listings to Claude (${info.pending} pending)`
+    : "Setup needed — click for details:\n\n" + info.blockers.join("\n\n");
+}
+
 $("enrichbtn").addEventListener("click", async () => {
+  const info = state.stats && state.stats.enrich;
+  if (info && !info.ready) {                       // don't burn a round trip on a known-bad call
+    toast("Enrichment needs setup. " + info.blockers.join(" "), 0);
+    return;
+  }
+  if (info && info.pending === 0) { toast("Nothing left to enrich."); return; }
   const b = $("enrichbtn");
   b.disabled = true; b.textContent = "Enriching…";
   try {
     const res = await api("/api/enrich", { method: "POST", body: "{}" });
     toast(res.message, 6000);
-    await loadTab();
-  } catch (e) { toast("Enrich failed: " + e.message, 6000); }
-  b.disabled = false; b.textContent = "Enrich";
+    await Promise.all([loadTab(), loadStats()]);
+  } catch (e) {
+    toast("Enrich failed: " + e.message, 0);       // sticky: setup/API errors need reading
+    await loadStats();
+  }
+  b.disabled = false;
+  renderEnrichButton(state.stats && state.stats.enrich);
 });
 
 /* ---------- boot (supports deep links: #stats, #<listing id>) ---------- */

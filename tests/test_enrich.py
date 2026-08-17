@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from intern_queue.enrich import SCHEMA, build_system, resume_for, validate
+from intern_queue.enrich import SCHEMA, build_system, preflight, resume_for, validate
 
 
 def test_resume_version_derived_from_role_class():
@@ -34,6 +34,25 @@ def test_system_prompt_is_policy_verbatim_plus_scoped_excerpts(candidate):
     # nothing else about the candidate leaks into context
     for forbidden in ("identity", "phone", "gpa", "documents", "referrals", "tiers"):
         assert f"{forbidden}:" not in system.split("# candidate.yaml excerpts")[1]
+
+
+def test_preflight_reports_missing_api_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    blockers = preflight()
+    assert any("ANTHROPIC_API_KEY" in b for b in blockers)
+    assert any("export ANTHROPIC_API_KEY" in b for b in blockers)  # actionable, not just a diagnosis
+
+
+def test_preflight_passes_with_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    assert preflight() == []  # SDK is a normal dependency, so only the key can block
+
+
+def test_preflight_accepts_auth_token_instead(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "oauth-token")
+    assert preflight() == []
 
 
 def test_schema_is_strict():

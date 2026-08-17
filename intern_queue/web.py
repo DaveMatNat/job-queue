@@ -87,9 +87,13 @@ def stats_payload(con, config) -> dict:
         "SELECT count(*) n FROM listings WHERE status IN ('NEW','QUEUED') AND is_active=1"
         " AND first_seen_at >= datetime('now', '-3 days')").fetchone()["n"]
     last = con.execute("SELECT max(fetched_at) t FROM fetch_cache").fetchone()["t"]
+    from intern_queue.enrich import pending_count, preflight
+
+    blockers = preflight()
     return {"by_status": by_status, "weeks": weeks, "by_tier": by_tier, "by_source": by_source,
             "applied": len(applied_ids), "responded": responded, "drops": drops, "fresh_72h": fresh,
-            "season": config["general"]["season"], "last_poll": last}
+            "season": config["general"]["season"], "last_poll": last,
+            "enrich": {"ready": not blockers, "blockers": blockers, "pending": pending_count(con)}}
 
 
 def do_action(con, body: dict) -> tuple[int, dict]:
@@ -128,13 +132,17 @@ def run_poll(config, candidate, con) -> tuple[int, dict]:
 
 
 def run_enrich(config, candidate, con) -> tuple[int, dict]:
+    """One enrichment batch. Setup problems return 400 with an actionable
+    message; API/network failures return 502 rather than a bare traceback."""
     from intern_queue.enrich import run_enrichment
 
     out = Console(file=StringIO(), width=200)
     try:
         run_enrichment(con, config, candidate, out, batches=1)
-    except SystemExit as e:
+    except SystemExit as e:  # preflight blockers and validation failures
         return 400, {"error": str(e)}
+    except Exception as e:  # auth rejected, rate limited, network down
+        return 502, {"error": f"{type(e).__name__}: {e}"}
     return 200, {"message": out.file.getvalue().strip() or "done"}
 
 

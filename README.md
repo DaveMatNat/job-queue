@@ -79,6 +79,18 @@ job is to make that mistake hard.
 
 ## Enrichment (optional, Phase 2)
 
+Needs one thing beyond `uv sync` — an API key in the environment the process is
+started from:
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com
+uv run intern-queue web               # or: uv run intern-queue enrich
+```
+
+If it isn't set, the web UI's Enrich button shows `⚠ Enrich` and tells you
+exactly what's missing instead of failing on click. Roughly $2–3 enriches a
+full ~750-listing queue.
+
 `intern-queue enrich` sends batches of 25 listings to Claude
 (`claude-opus-5`, configurable) with [POLICY.md](POLICY.md) as the verbatim
 system prompt and only `approved_facts` + `eligibility` from `candidate.yaml`
